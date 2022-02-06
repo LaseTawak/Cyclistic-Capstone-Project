@@ -1,0 +1,584 @@
+---
+title: "Cyclistic 2021 Capstone Project"
+author: "Toluwalase Tawak"
+date: "2/5/2022"
+output: html_document
+---
+### ASK
+For this Business Task, We are required to outline actions to be considered by Key Stakeholders to enable the Organization strategize in converting Casual bike riders to Members.
+For this we would focus on the following:
+
+1. How do annual members and casual riders use Cyclistic bikes differently?
+2. Why would casual riders buy Cyclistic annual memberships?
+3. How can Cyclistic use digital media to influence casual riders to become members?
+ 
+
+### PREPARE
+The data provided is a public dataset located [here](https://divvy-tripdata.s3.amazonaws.com/index.html). Information on the lincencing of this dataset can also be found [here](https://www.divvybikes.com/data-license-agreement).
+The 12 datasets reprensenting each month of the year 2020 was downloaded in in Zipped format. Each months data is in structured format, CSV type. The Columns are consistent throught out the individual months.
+The data appears to be Realiable, Original, Comprehensive, Current and Cited, therefore it can be trusted to perform our analysis.
+
+### PROCESS
+All Exploration and Data Analysis were carried out using R in RStudio.
+Every Cleaning, Transformation and Analysis process is well detailed below.
+
+##### Setting up environment
+```{r load packages, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(geosphere)
+library(naniar)
+```
+##### Read Cyclistic Dataset for 12 months
+```{r read data, message=FALSE, warning=FALSE, paged.print=FALSE}
+jan <- read_csv("./2021_january_tripdata.csv")
+feb <- read_csv("./2021_february_tripdata.csv")
+mar <- read_csv("./2021_march_tripdata.csv")
+apr <- read_csv("./2021_april_tripdata.csv")
+may <- read_csv("./2021_may_tripdata.csv")
+jun <- read_csv("./2021_june_tripdata.csv")
+jul <- read_csv("./2021_july_tripdata.csv")
+aug <- read_csv("./2021_august_tripdata.csv")
+sep <- read_csv("./2021_september_tripdata.csv")
+oct <- read_csv("./2021_october_tripdata.csv")
+nov <- read_csv("./2021_november_tripdata.csv")
+dec <- read_csv("./2021_december_tripdata.csv")
+```
+##### Join dataframes
+```{r bind dataframes, message=FALSE, warning=FALSE, paged.print=FALSE}
+bike_rides <- rbind(jan,feb,mar,apr,may,jun,jul,aug,sep,oct,nov,dec)
+```
+
+##### Create new column for start and end time
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+bike_rides$start_hr <- hour(bike_rides$started_at)
+bike_rides$end_hr <- hour(bike_rides$ended_at)
+```
+##### Calculate trip duration in hours and minutes
+```{r trip duration}
+bike_rides$trip_hour <- as.numeric(difftime
+                                (bike_rides$ended_at,bike_rides$started_at,
+                                 units = c("hours")))
+
+bike_rides$trip_minutes <- as.numeric(difftime
+                                  (bike_rides$ended_at,bike_rides$started_at,
+                                   units = c("mins")))
+```
+##### Drop rows with less than 0 minutes trips and null cells
+```{r drop rows}
+bike_rides <- bike_rides %>% filter(trip_minutes > 0)
+```
+we lose 653 trips from our dataframe
+
+##### Calculate distance between start and end stations
+```{r distance}
+bike_rides <- bike_rides %>% mutate(
+                    distance_km = (distHaversine(cbind(start_lng, start_lat),
+                                     cbind(end_lng, end_lat)))/1000)
+```
+This information will only provide us with the distance between stations. Riders can take very long distance trips and return bikes to their initial pick-up station, resulting in a travelled distance of zero(0).  
+To better understand distance travelled by riders, odometers would have to added to the bikes.
+
+##### Extract day of week
+```{r day of week}
+bike_rides$start_wkday <- weekdays(bike_rides$started_at)
+bike_rides$end_wkday <- weekdays(bike_rides$ended_at)
+```
+##### Checking for duplicate rows using the ride_id column  
+```{r}
+bike_rides[duplicated(bike_rides$ride_id),]
+```
+No duplicates were found, dataframe is indentified by Ride_id, therefore no
+ride_id is repeated.  
+
+##### Check for NA values
+```{r nan values}
+colnames(bike_rides)[colSums(is.na(bike_rides)) > 0]
+colSums(is.na(bike_rides))
+sum(!complete.cases(bike_rides))/5594410
+```
+Our output shows that a majority of the missing data is from the columns 
+that deal with location.  
+We see that almost 20% of our dataframe contains null values this seems like a large amount of data to drop as this might skew our analysis.  
+We should try to analyse and see why we have such a large amount null rows.
+##### Create dataframe for rows
+```{r null_df}
+null_df <- bike_rides[rowSums(is.na(bike_rides)) > 0,]
+```
+##### Investigate Null dataframe
+```{r }
+count(null_df, rideable_type, sort=TRUE)
+head(count(null_df, start_station_name, rideable_type, sort = TRUE), n =10)
+count(null_df, rideable_type, member_casual, sort = TRUE)
+count(null_df, member_casual, sort = TRUE)
+```
+we see our null dataframe seems to be greatly centered around the type of bike (rideable_type) specifically Electric bikes as the biggest culprit.
+This could be an operational problem with bikes not registering location properly, this observation should be properly investigated to prevent future loss in data.  
+  
+since the null having rows have other attributes important to our analysis, we'll replace the null values in the start_station_name and end_station_name
+with "missing station".
+```{r}
+bike_rides$start_station_name[is.na(bike_rides$start_station_name)] = "missing station"
+
+bike_rides$end_station_name[is.na(bike_rides$end_station_name)] = "missing station"
+
+summary(bike_rides)
+```
+We immediately see what look like strong outliers in our trip_minutes and trip_hours columns with the minimum trip taking 0.02 minutes and the maximum trip taking 932.4 hours (38.85 days), this could be possible as a rider could have rented the bike for that long or didn't mind paying the extra fee charged for late returns as seen on the divvy bikes website.  
+we will further investigate these column to see just how much of our observations are outliers.
+
+##### Density plot 
+```{r }
+ggplot(bike_rides) +
+  geom_density(mapping = aes(x=trip_minutes)) +
+  facet_wrap(~member_casual)
+```
+
+As we can see, we cannot make useful sense from our density plot because of  the outliers in our data, we can only tell that majority rides travelled for less than 2000 minutes.  
+
+##### Trips less than 1 minute
+```{r 1 minute}
+low_trips <- bike_rides %>%
+             filter(trip_minutes < 1)
+
+count(low_trips, member_casual, sort=TRUE)
+
+count(low_trips, rideable_type, sort=TRUE)
+
+head(count(low_trips, start_station_name, end_station_name,sort=TRUE), n=10)
+```
+
+Filtering trips that were less than 1 minute we see that most of the trips start and end stations were the same, assuming that "missing station to missing station" trips are actually trips between the same station.  
+This satisfies our assumption that riders changed their minds about taking trips. docked bikes were less likely to be used for trips less than a minute.  
+"Streeter Dr & Grand Ave" station has the highest foot traffic, almost two
+times greater than the its closest competitor.  
+
+###### *Trips less than 1 minute with different start and end stations*
+```{r }
+low_trips_2 <- bike_rides %>%
+            filter(trip_minutes < 1, start_station_name != end_station_name,
+                                    start_station_name != "missing station",
+                                    end_station_name != "missing station")
+
+count(low_trips_2, member_casual, sort=TRUE)
+
+count(low_trips_2, rideable_type, sort=TRUE)
+
+head(count(low_trips_2, start_station_name, end_station_name, sort=TRUE), n=10)
+```
+
+Here we see that only 1470 trips less than 1 minute, had different start & end stations when excluding "missing stations", members were responsible for 95% of these trips and classic bikes were the most used, also observing that no docked bikes travelled less than a minute between different stations.  
+Since this is a very small portion of our data we can assume that for majority of these trips, the stations are not far apart and Classic bikes are the most popular bikes for very short trips.  
+
+###### Average distance between stations for trips less than 1 min & different stations
+
+```{r message=FALSE, warning=FALSE}
+low_trips_2 %>%
+  group_by(start_station_name, end_station_name) %>%
+  summarise(mean_dist = mean(distance_km)) %>% 
+  arrange(desc(mean_dist))
+```
+
+To further confirm our assumption we see that the maximum average distance between any of the start and end stations is 704 metres, a relatively short distance.    
+Here, we remove all trips less than 1 minute from our bike rides.
+
+```{r }
+bike_rides <- bike_rides %>%
+              filter(trip_minutes >= 1)
+```
+##### Drop Columns
+```{r }
+bike_rides <- select(bike_rides, -c(ride_id, start_station_id, end_station_id,
+                                    start_lat, start_lng, end_lat, 
+                                    distance_km, end_lng))
+
+summary(bike_rides)
+```
+
+Because of the extremely the high values we have in the trip duration column, we shall use Inter-Quartile Range to identify outliers.  
+Instead of dropping rows that match our outlier values we shall create a long_trip dataframe for them and also keep the non_outlier trips in a dataframe called regular_trips.  
+We shall analyze both dataframes and compare.
+
+##### Remove outliers
+find Q1, Q3, and interquartile range for values in trip_minutes column.
+```{r IQR, echo=TRUE}
+Q1 <- quantile(bike_rides$trip_minutes, .25)
+Q3 <- quantile(bike_rides$trip_minutes, .75)
+IQR <- IQR(bike_rides$trip_minutes)
+
+print(Q1)
+print(Q3)
+print(IQR)
+```
+Create a dataframe for our outliers
+```{r long trip}
+long_trip <- subset( bike_rides, trip_minutes <= (Q1 - (1.5*IQR) ) |
+                      trip_minutes >= (Q3 + (1.5*IQR) )
+                    )
+```
+Keep rows in dataframe that have values within 1.5*IQR of Q1 and Q3
+```{r regular}
+regular_trip <- subset( bike_rides, trip_minutes > (Q1 - (1.5*IQR) ) &
+                        trip_minutes < (Q3 + (1.5*IQR) )
+                      )
+```
+### *ANALYSIS*
+###### Long Trip
+```{r regular 1}
+count(long_trip, member_casual, sort=TRUE)
+count(long_trip, rideable_type, sort=TRUE)
+
+long_trip$start_wkday <- factor(long_trip$start_wkday, 
+                                levels=c("Monday", "Tuesday", "Wednesday", 
+                                         "Thursday", "Friday", "Saturday", 
+                                         "Sunday"))
+
+
+ggplot(long_trip) + 
+  geom_bar(aes(x= start_wkday, fill = rideable_type) ) + 
+  facet_wrap(~member_casual) +
+  xlab('Weekday') +
+  theme(axis.text.x = element_text(angle = 45), 
+        plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nNumber of Trips by Day of the Week",
+       y = "Number of Trips", x="Day of Week")
+```
+
+
+###### Regular trip
+```{r }
+count(regular_trip, member_casual, sort = TRUE)
+count(regular_trip, rideable_type)
+
+regular_trip$start_wkday <- factor(regular_trip$start_wkday, 
+                                   levels=c("Monday", "Tuesday", "Wednesday", 
+                                            "Thursday", "Friday", "Saturday", 
+                                            "Sunday"))
+
+ggplot(regular_trip) + 
+  geom_bar(aes(x=start_wkday, fill = rideable_type )) + 
+  facet_wrap(~member_casual) +
+  xlab('Weekday') +
+  theme(axis.text.x = element_text(angle = 45), 
+        plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nNumber of Trips by Day of the Week",
+       y = "Number of Trips", x="Day of Week")
+```
+
+Casual users are responsible for 85.44% of the long trips, using Classic bikes more than any other bike.  
+This could mean that Casuals tend to keep bikes longer than they should.  
+For Regular trips, there are slightly more members who take medium length trips with an almost normal distribution for each day of the week.  
+Our analysis also shows a pattern that Casuals have a preference for weekend rides for both long and short rides.  
+Docked bikes are the least favourite bike to use for any kind of trip, as we can see Members don't use docked bikes and have a preference for Classic bikes.
+
+###### Long trip
+```{r }
+ggplot(long_trip) +
+  geom_bar(mapping = aes(x=start_hr, fill= member_casual)) +
+  facet_wrap(~start_wkday )+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nNumber of Trips per Hour by Day of the Week",
+       y="Number of Trips", x = "Start Hour")
+```
+
+###### Regular trip
+```{r }
+ggplot(long_trip) +
+  geom_bar(mapping = aes(x=start_hr, fill= member_casual)) +
+  facet_wrap(~start_wkday )+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nNumber of Trips per Hour by Day of the Week",
+       y="Number of Trips", x = "Start Hour")
+```
+
+In a 24hr time frame for each day of the week, it is more obvious that there are a lot more long rides by Casual users on weekends than any other day, having peak traffic between 13:00HRS and 14:00HRS.  
+Analysis shows that traffic peaks at 17:00HRs for long and regular trips for both Casual riders and Members except on weekends.  
+Also noticeable is that casual riders have a similar trend line for usage from Monday to Friday, a different but consistent pattern can also be seen for Members for the same days.  
+
+###### Long Trips
+```{r }
+ggplot(long_trip) +
+  geom_histogram(mapping = aes(x=trip_minutes), bins = 20) +
+  facet_wrap(~member_casual)+
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  labs(title = "LONG TRIPS \nTrip Duration distribution",
+       y="Number of Trips", x = "Trip Duration (Minutes)")
+```
+
+###### Regular Trips
+```{r }
+ggplot(regular_trip) +
+  geom_histogram(mapping = aes(x=trip_minutes), bins = 20) +
+  facet_wrap(~member_casual)+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nTrip Duration distribution",
+       y="Number of Trips", x = "Trip Duration (Minutes)")
+```
+
+We see that trips between 0 and 15 minutes are the most common duration for trips taken by both members and casuals when considering regular length trips.  
+The Long trip histogram shows no valuable information we were not previously aware of.  
+
+###### Long Trips
+```{r }
+long_trip %>%
+  group_by(member_casual, rideable_type) %>%
+  summarise(avg_time = mean(trip_minutes), 
+            total_time = sum(trip_minutes)) %>% 
+  arrange(desc(avg_time)) %>%
+  ggplot() +
+  geom_col(mapping = aes(x=rideable_type, y=avg_time, fill=member_casual)
+           ,position="dodge") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nAverage Trip Duration by Bike Type",
+       y="Average Time", x= "Bike Type")
+```
+
+###### Regular Trips
+```{r }
+regular_trip %>%
+  group_by(member_casual, rideable_type) %>%
+  summarise(avg_time = mean(trip_minutes), 
+            total_time = sum(trip_minutes)) %>% 
+  arrange(desc(avg_time)) %>%
+  ggplot() +
+  geom_col(mapping = aes(x=rideable_type, y=avg_time, fill=member_casual)
+           ,position="dodge")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nAverage Trip Duration by Bike Type",
+       y="Average Time", x= "Bike Type")
+```
+
+On average, Casual riders take longer-regular trips than members.  
+Confirmation that for regular trips, members have an maximum average trip duration of 12.6 minutes and that is while using classic bikes.  
+Surprisingly, Casuals tend to take longer-regular trips, 21.8 minutes while using docked bikes, even as it is the least favourite bike of any class.  
+For our long trips, docked bikes seem to take the cake by averaging over 200 per trip, this would be as a result of the extreme outliers contained in this dataframe. This outlier could be caused by riders not knowing how to properly dock bikes after use. Classic bikes have the highest average trip duration by both Members and Casuals.
+
+###### Long Trips
+```{r }
+long_trip %>%
+  group_by(member_casual, start_wkday) %>%
+  summarise(avg_time = mean(trip_minutes)) %>% 
+  arrange(desc(avg_time)) %>%
+  ggplot() +
+  geom_col(mapping = aes(x=start_wkday, y=avg_time, fill=member_casual)
+           ,position="dodge")+
+  ggtitle("") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nAverage Trip Duration per WeekDay",
+       y="Average Time", x= "Day of Week")
+```
+
+###### Regular Trips
+```{r }
+regular_trip %>%
+  group_by(member_casual, start_wkday) %>%
+  summarise(avg_time = mean(trip_minutes)) %>% 
+  arrange(desc(avg_time)) %>%
+  ggplot() +
+  geom_col(mapping = aes(x=start_wkday, y=avg_time, fill=member_casual)
+           ,position="dodge")+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nAverage Trip Duration per WeekDay",
+       y="Average Time", x= "Day of Week")
+```
+
+As seen earlier that there are more of both riders travelling on weekends, we can also see here that they have their highest trip duration for regular trips on weekends at 17.7 and 17.5 minutes for Sunday and Saturday respectively for Casuals while Members spend roughly 4 minutes less.  
+Another observation is Thursdays is consistent between both riders with the lowest average trip duration.  
+For long trips we see that Casuals have range for average trip duration of roughly 10 minutes, higher than regular trips. while Casuals have a 39 minutes range. We see a divergence from the usual trend of weekends winning in every analysis carried out since with Thursday & Fridays having the highest average Trip duration for Casuals and Members. This would mean that our extreme Trip duration values come from these days.
+
+###### Long trip
+```{r }
+long_trip %>%
+  mutate(month = format(started_at, "%m")) %>%
+  ggplot() +
+  geom_bar(mapping = aes(x=month, fill=member_casual)
+           ,position="dodge") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nNumber of Trips per Month",
+       y="Number of Trips", x= "Month")
+```
+
+###### Regular trip
+```{r }
+regular_trip %>%
+  mutate(month = format(started_at, "%m")) %>%
+  ggplot() +
+  geom_bar(mapping = aes(x=month, fill=member_casual)
+           ,position="dodge") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nNumber of Trips per Month",
+       y="Number of Trips", x= "Month")
+```
+
+For both long and regular trips we see that we have fewer trips taking place from December to March for Members and Casual riders, a quick research on weather patterns shows that these are Winter months, so it would be difficult to ride in the snow and extremely cold to be outdoors on a bike.  
+For Regular trips, it is also noticeable that June through September have the most trips for any user class, as these months are in the summer, the weather is conducive for riding and a lot more people are on holidays. The month of July also has more Casual trips than Members, historical data for the month would have to be investigated to confirm if this is a recurring trend.  
+For long trips, there's a similar trend for volume of trips for each month, with the volume of rides peaking in July too.  
+
+###### Long trips
+```{r }
+long_trip %>%
+  mutate(month = format(started_at, "%m")) %>%
+  group_by(month, member_casual) %>%
+  summarise(avg_time = mean(trip_minutes)) %>%
+  ggplot(aes(x= month, y= avg_time, group= member_casual)) +
+  geom_line(aes(color = member_casual) ) +
+  geom_point(aes(color = member_casual)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "LONG TRIPS \nAverage Trip Duration per Month",
+       y="Average Trip Duration", x= "Month")
+```
+
+###### Regular trips
+```{r }
+regular_trip %>%
+  mutate(month = format(started_at, "%m")) %>%
+  group_by(month, member_casual) %>%
+  summarise(avg_time = mean(trip_minutes)) %>%
+  ggplot(aes(x=month, y=avg_time, group=member_casual)) +
+  geom_line(aes(color=member_casual) ) +
+  geom_point(aes(color=member_casual)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "REGULAR TRIPS \nAverage Trip Duration per Month",
+       y="Average Trip Duration", x= "Month")
+```
+
+While the average trip duration for Casuals is higher than for Members, we see they almost mirror each other, peaking in May and having their least in December. While we saw earlier that there are more trips in the summer, riders take short trips, this could be because the weather is too hot to engage is physical activities like cycling for too long.  
+For long trips we see the Average trip duration peak in February, also higher values in the Winter season than other months. This means people keep bikes longer and could be as a result of snow making it difficult for people to move around and return bikes. We also note that average trip duration are quite low during the summer.  
+Further investigation should be carried out to confirm the causes of these points.
+
+###### Casual regular trips
+```{r }
+regular_trip %>%  
+  filter(member_casual == "casual", 
+         start_station_name != "missing station") %>% 
+  group_by(start_station_name) %>%
+  summarise(total = n()) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(start_station_name, total), 
+                         fill=start_station_name)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Visited Start Stations by Casual Riders",
+       y = "Start Station Name", x = "Number of Visits")
+```
+
+###### Member regular trips
+```{r }
+regular_trip %>%  
+  filter(member_casual == "member", 
+         start_station_name != "missing station") %>% 
+  group_by(start_station_name) %>%
+  summarise(total = n()) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(start_station_name, total), 
+                         fill=start_station_name)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Visited Start Stations by Members",
+       y = "Start Station Name", x = "Number of Visits")
+```
+
+After excluding missing stations, the visualization shows that Casual and Members have very different locations to start their trip, having only 3 stations in common. This could strong difference could be a matter of preference but I would prefer to hypothesize that these values are more dependent on where riders live, work and carry out most of their daily activities. As seen in the visual Streeter Dr & Grand Ave visited by Casuals has the most visits of the two class of users.
+
+```{r }
+regular_trip %>%  
+  filter(member_casual == "casual", 
+         end_station_name != "missing station") %>% 
+  group_by(end_station_name) %>%
+  summarise(total = n()) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(end_station_name, total), 
+                         fill=end_station_name)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Visited End Station by Casuals",
+       y = "End Station Name", x = "Number of Rides")
+
+regular_trip %>%  
+  filter(member_casual == "member", 
+         end_station_name != "missing station") %>% 
+  group_by(end_station_name) %>%
+  summarise(total = n()) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(end_station_name, total), 
+                         fill=end_station_name)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Visited End Station by Members",
+       y = "End Station Name", x = "Number of Rides")
+```
+
+We can see that for Members and Casuals, stations where rides ended are almost the same as where trips started, with only 1 station in from the Start station changing in the end station.  
+Streeter Dr & Grand Ave by Casuals still is the most visited station when looking at where trips end.
+
+```{r }
+regular_trip %>%  
+  filter(member_casual == "casual", 
+         start_station_name != "missing station", 
+         end_station_name != "missing station") %>% 
+  group_by(start_station_name, end_station_name) %>%
+  summarise(total = n()) %>%
+  mutate(route = 
+           paste(start_station_name,end_station_name,sep = "-->")) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(route, total), 
+                         fill=route)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Popular Routes by Casuals",
+       y = "Route", x = "Number of times taken")
+
+regular_trip %>%  
+  filter(member_casual == "member", 
+         start_station_name != "missing station", 
+         end_station_name != "missing station") %>% 
+  group_by(start_station_name, end_station_name) %>%
+  summarise(total = n()) %>%
+  mutate(route = 
+           paste(start_station_name,end_station_name,sep = "-->")) %>%
+  arrange( desc(total) ) %>%
+  head(10) %>%
+  ggplot()+
+  geom_col(mapping = aes(x=total, y=reorder(route, total), 
+                         fill=route)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  labs(title = "REGULAR TRIPS \nMost Popular Routes by Members",
+       y = "Route", x = "Number of times taken")
+```
+
+4 of our top 5 routes by casuals, start and end in the same station. We can also see that Streeter Dr & Grand Ave appears to be the most popular station for Casuals, occuring 8 times in our top 10 routes.  
+The stations in most popular routes by Members are very different from the stations visited the most as shown previously.
+
+### *CONCLUSION*
+The data provided did not provide information specific to unique riders to enable us better understand how each individual accessed and made use of our bikes.  
+The data provided gave information on unique rides/trips, data over a longer period (5 years) should have been provided to better investigate and confirm patterns that were noticed.
+With the information provided, I would suggest that to convert Casual riders to Members the following should be considered;
+
+* Increase charge for late returns by Casuals.
+* Run promotion giving extra time for members rides during the Summer.
+* Run ads at the most visited stations by Casuals.
+* Provide promotion for rides between the most travelled routes.
+* Give priority access for Members during Casual peak time and months.
+* Run ad campaigns for Summer riders.
+* Increase minutes for weekend trips by members.
+* Increase rental costs for weekend trips by Casual riders.
