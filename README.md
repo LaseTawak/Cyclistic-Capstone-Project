@@ -1,7 +1,7 @@
 # Cyclistic-Capstone-Project
 
 ## Introduction
-The project focuses on the Cyclistic dataset, analyzing the distinct usage patterns of annual members and casual riders. Utilizing R, the study processes and interprets data to understand how different rider types engage with Cyclistic's bike-sharing service. This project was carried out to satisfy the requirement for the Google Data Analytics Capstone Project certificate. Data used focuses on the year 2020 and can be found [here](https://divvy-tripdata.s3.amazonaws.com/index.html)
+The project focuses on the Cyclistic dataset, analysing the distinct usage patterns of annual members and casual riders. Utilizing R, the study processes and interprets data to understand how different rider types engage with Cyclistic's bike-sharing service. This project was carried out to satisfy the requirement for the Google Data Analytics Capstone Project certificate. Data used focuses on the year 2020 and can be found [here](https://divvy-tripdata.s3.amazonaws.com/index.html)
 
 ## Goal/Objective
 Aim to uncover insights that aid in converting casual riders into annual members. This involves examining rider behaviours, station popularity, and time-based usage trends to devise effective strategies for membership growth.
